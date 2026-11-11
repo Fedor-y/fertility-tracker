@@ -165,6 +165,13 @@ def check(root, *, reopen_only=False):
             spin(lambda: bool(ready))
             assert window.grab().save(str(output / (name + '.png')))
     capture('frozen-overview')
+    assert not window.chart_controls.isVisible()
+    window.chart_settings_button.click()
+    assert window.chart_settings_popup.isVisible() and window.chart_controls.isVisible()
+    assert not window.chart_settings_button.icon().isNull()
+    capture('frozen-chart-settings')
+    window.chart_settings_button.click()
+    assert not window.chart_settings_popup.isVisible()
     renderer_sandbox = []
     children = [os.getpid()]
     while children:

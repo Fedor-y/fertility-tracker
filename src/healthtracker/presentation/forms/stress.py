@@ -37,6 +37,7 @@ class StressDialog(EntryDialog):
         self.form.addWidget(QLabel("Момент наблюдения"))
         self.moment = MomentInput(old.observed_at if old else None)
         self.form.addWidget(self.moment)
+        self.causes_section=self.group_fields(2,self.form.indexOf(self.moment)-2,"Причины и комментарий",expanded=old is not None)
         self.finish_setup()
 
     def state(self):

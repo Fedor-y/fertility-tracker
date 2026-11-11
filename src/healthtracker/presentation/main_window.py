@@ -1,9 +1,10 @@
 from datetime import UTC, datetime
 
-from PySide6.QtCore import QByteArray, QDate, QSettings, QTimer, Qt, QSize
+from PySide6.QtCore import QEvent, QByteArray, QDate, QSettings, QTimer, Qt, QSize, Property, QPropertyAnimation, QEasingCurve
+from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
-    QApplication, QFrame, QHBoxLayout, QLabel, QListWidget, QMainWindow, QMenu,
-    QMessageBox, QPushButton, QScrollArea, QStackedWidget, QToolButton, QVBoxLayout, QWidget,
+    QApplication, QFrame, QGridLayout, QHBoxLayout, QLabel, QListWidget, QMainWindow, QMenu,
+    QPushButton, QScrollArea, QStackedWidget, QToolButton, QVBoxLayout, QWidget,
 )
 
 from healthtracker.application.session import ApplicationSession
@@ -19,13 +20,14 @@ from healthtracker.domain.errors import DomainValidationError
 from healthtracker.presentation.chart import ChartView
 from healthtracker.presentation.diary import DiaryPage, system_zone
 from healthtracker.presentation.chart_controls import ChartControls
+from healthtracker.presentation.chart_settings_popup import ChartSettingsPopup
 from healthtracker.domain.analytics import AnalysisContext
 from healthtracker.application.charts import ChartPreparation
 from healthtracker.presentation.chart_controller import ChartController
 from healthtracker.presentation.chart_preferences import PreferencesController
 from healthtracker.presentation.analytics_page import AnalyticsPage
 from healthtracker.presentation.backup_page import BackupPage
-from healthtracker.presentation.theme import apply_theme, navigation_icon, role
+from healthtracker.presentation.theme import apply_theme, navigation_icon, action_icon, role, show_warning
 
 
 class MainWindow(QMainWindow):
@@ -53,18 +55,47 @@ class MainWindow(QMainWindow):
         apply_theme(self)
         body = QWidget(self)
         body.setObjectName('appBody')
-        layout = QHBoxLayout(body)
+        layout = self._main_layout = QHBoxLayout(body)
         layout.setContentsMargins(0,0,0,0)
         layout.setSpacing(0)
-        sidebar = QFrame()
+        sidebar = self.sidebar = QFrame()
         sidebar.setObjectName('sideBar')
         sidebar.setFixedWidth(176)
         side = QVBoxLayout(sidebar)
-        side.setContentsMargins(14,22,14,18)
+        side.setContentsMargins(8,16,8,16)
         side.setSpacing(18)
         brand = QLabel('HealthTracker')
         brand.setObjectName('brand')
-        side.addWidget(brand)
+        brand.setStyleSheet('font-size: 13px; font-weight: 600;')
+        self.brand = brand
+        brand_row = self.sidebar_header_grid = QGridLayout()
+        brand_row.setSpacing(4)
+        brand_row.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        brand_row.addWidget(brand, 0, 0, 1, 2)
+        self.sidebar_toggle = QToolButton()
+        self.sidebar_toggle.setProperty('kind', 'icon')
+        self.sidebar_toggle.setIcon(action_icon('sidebar'))
+        self.sidebar_toggle.setIconSize(QSize(20,20))
+        self.sidebar_toggle.setFixedSize(36,36)
+        self.sidebar_toggle.setAccessibleName('Свернуть меню')
+        self.sidebar_toggle.clicked.connect(lambda: self._set_sidebar_collapsed(not self.sidebar_collapsed))
+        brand_row.addWidget(self.sidebar_toggle, 1, 0)
+        self.fullscreen_button = QToolButton()
+        self.fullscreen_button.setProperty('kind', 'icon')
+        self.fullscreen_button.setIconSize(QSize(20,20))
+        self.fullscreen_button.setFixedSize(36,36)
+        self.fullscreen_button.clicked.connect(self.toggle_fullscreen)
+        brand_row.addWidget(self.fullscreen_button, 1, 1)
+        self._fullscreen_geometry = QByteArray()
+        self._fullscreen_state = Qt.WindowState.WindowNoState
+        self.fullscreen_shortcut = QShortcut(QKeySequence('F11'), self)
+        self.fullscreen_shortcut.setAutoRepeat(False)
+        self.fullscreen_shortcut.activated.connect(self.toggle_fullscreen)
+        self.fullscreen_escape = QShortcut(QKeySequence(Qt.Key.Key_Escape), self)
+        self.fullscreen_escape.setAutoRepeat(False)
+        self.fullscreen_escape.activated.connect(self.leave_fullscreen)
+        self._sync_fullscreen_button()
+        side.addLayout(brand_row)
         caption = QLabel('ЛИЧНЫЙ ДНЕВНИК')
         caption.setObjectName('brandCaption')
         caption.hide()
@@ -76,8 +107,19 @@ class MainWindow(QMainWindow):
         self.navigation.setIconSize(QSize(18,18))
         self.navigation.setSpacing(2)
         for index in range(self.navigation.count()):
-            self.navigation.item(index).setIcon(navigation_icon(index))
+            item = self.navigation.item(index)
+            item.setIcon(navigation_icon(index))
+            item.setData(Qt.ItemDataRole.UserRole, item.text())
+            item.setData(Qt.ItemDataRole.AccessibleTextRole, item.text())
+            item.setToolTip(item.text())
+        self.navigation.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         side.addWidget(self.navigation,1)
+        self.sidebar_animation = QPropertyAnimation(self, b'sidebarWidth', self)
+        self.sidebar_animation.setDuration(250)
+        self.sidebar_animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self.sidebar_animation.finished.connect(self._finish_sidebar_animation)
+        self.sidebar_collapsed = False
+        self._set_sidebar_collapsed(self.settings.value('window/sidebar_collapsed', False, type=bool) if self.settings is not None else False, persist=False)
         footer = role(QLabel('Локально на устройстве'),'secondary')
         footer.setWordWrap(True)
         footer.hide()
@@ -108,12 +150,25 @@ class MainWindow(QMainWindow):
         overview_layout.setContentsMargins(0,6,0,0)
         overview_layout.setSpacing(9)
         toolbar = QHBoxLayout()
-        self.cognitive_button = QPushButton("Оценить состояние")
+        self.cognitive_button = QPushButton()
         self.cognitive_button.setAccessibleName("Оценить когнитивное состояние")
-        self.cognitive_button.setProperty('kind','primary')
-        self.physical_button = QPushButton("Физическое состояние")
+
+        self.physical_button = QPushButton()
         self.add_button = QToolButton()
-        self.add_button.setText("Добавить")
+        self.chart_settings_button = QToolButton()
+        self.chart_settings_button.setCheckable(True)
+        for button, icon, label in (
+                (self.cognitive_button, 'brain', 'Оценить когнитивное состояние'),
+                (self.physical_button, 'biceps', 'Оценить физическое состояние'),
+                (self.add_button, 'plus', 'Добавить запись'),
+                (self.chart_settings_button, 'gear', 'Настройки графика')):
+            button.setProperty('kind', 'icon')
+            button.setIcon(action_icon(icon))
+            button.setIconSize(QSize(23,23))
+            button.setFixedSize(36,36)
+            button.setAccessibleName(label)
+            button.setToolTip(label)
+        toolbar.setSpacing(7)
         self.add_menu = QMenu(self.add_button)
         self.add_menu.setObjectName("addMenu")
         self.add_actions = {}
@@ -139,6 +194,7 @@ class MainWindow(QMainWindow):
             button.setToolTip("Форма пока недоступна.")
             toolbar.addWidget(button)
         toolbar.addWidget(self.add_button)
+        toolbar.addWidget(self.chart_settings_button)
         overview_layout.addLayout(toolbar)
         self.physical_suggestion = QPushButton("Дополнить оценку")
         self.physical_suggestion.setToolTip("Дополнительно оценить физическое состояние")
@@ -146,11 +202,12 @@ class MainWindow(QMainWindow):
         self.physical_suggestion.clicked.connect(lambda: self.open_physical())
         toolbar.addWidget(self.physical_suggestion)
         toolbar.addStretch()
-        self.chart_controls = ChartControls(AnalysisContext(self.chart_now(), system_zone()).today, overview)
+        self.chart_controls = ChartControls(AnalysisContext(self.chart_now(), system_zone()).today, overview, floating=True)
         self.chart_controls.setEnabled(False)
         self.chart_controls.reset_zoom.hide()
         self.chart_controls.changed.connect(self._controls_changed)
-        overview_layout.addWidget(self.chart_controls)
+        self.chart_settings_popup = ChartSettingsPopup(self.chart_controls,self.chart_settings_button,self)
+        self.chart_settings_button.clicked.connect(self._toggle_chart_settings)
         self.preferences_status = QLabel()
         self.preferences_status.setWordWrap(True)
         self.preferences_status.hide()
@@ -299,6 +356,92 @@ class MainWindow(QMainWindow):
             self.navigation.setEnabled(True)
         self._storage_state()
 
+    def _toggle_chart_settings(self):
+        if self.chart_settings_popup.isVisible():
+            self.chart_settings_popup.hide()
+        else:
+            self.chart_settings_popup.show_for_anchor()
+
+    def _sync_fullscreen_button(self):
+        active = self.isFullScreen()
+        label = 'Выйти из полного экрана (F11)' if active else 'Полный экран (F11)'
+        self.fullscreen_button.setIcon(action_icon('fullscreen-exit' if active else 'fullscreen'))
+        self.fullscreen_button.setToolTip(label)
+        self.fullscreen_button.setAccessibleName(label)
+        self.fullscreen_escape.setEnabled(active)
+
+    def toggle_fullscreen(self):
+        if self.isFullScreen():
+            self.leave_fullscreen()
+            return
+        self._fullscreen_geometry = self.saveGeometry()
+        self._fullscreen_state = self.windowState() & ~Qt.WindowState.WindowMinimized
+        self.showFullScreen()
+        self._sync_fullscreen_button()
+
+    def leave_fullscreen(self):
+        if not self.isFullScreen():
+            return
+        self.showNormal()
+        if not self._fullscreen_geometry.isEmpty():
+            self.restoreGeometry(self._fullscreen_geometry)
+        if self._fullscreen_state & Qt.WindowState.WindowMaximized:
+            self.showMaximized()
+        self._sync_fullscreen_button()
+
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.WindowStateChange and hasattr(self, 'chart_settings_popup'):
+            self.chart_settings_popup.hide()
+        if event.type() == QEvent.Type.WindowStateChange and hasattr(self, 'fullscreen_escape'):
+            self._sync_fullscreen_button()
+
+    @Property(int)
+    def sidebarWidth(self):
+        return self.sidebar.width()
+
+    @sidebarWidth.setter
+    def sidebarWidth(self, width):
+        self.sidebar.setFixedWidth(width)
+        self._main_layout.activate()
+
+    def _sidebar_labels(self, collapsed):
+        # Во время движения подписи целиком скрыты, поэтому не обрезаются.
+        self.brand.setVisible(not collapsed)
+        self.sidebar_header_grid.removeWidget(self.sidebar_toggle)
+        self.sidebar_header_grid.removeWidget(self.fullscreen_button)
+        self.sidebar_header_grid.addWidget(self.sidebar_toggle, 0 if collapsed else 1, 0)
+        self.sidebar_header_grid.addWidget(self.fullscreen_button, 1, 0 if collapsed else 1)
+        self.navigation.setProperty('collapsed', bool(collapsed))
+        for index in range(self.navigation.count()):
+            item = self.navigation.item(index)
+            item.setText('' if collapsed else item.data(Qt.ItemDataRole.UserRole))
+        self.navigation.style().unpolish(self.navigation)
+        self.navigation.style().polish(self.navigation)
+
+    def _finish_sidebar_animation(self):
+        self._sidebar_labels(self.sidebar_collapsed)
+        margin = 6 if self.sidebar_collapsed else 8
+        self.sidebar.layout().setContentsMargins(margin, 16, margin, 16)
+
+    def _set_sidebar_collapsed(self, collapsed, *, persist=True):
+        self.sidebar_animation.stop()
+        self.sidebar_collapsed = bool(collapsed)
+        target = 56 if collapsed else 176
+        label = 'Развернуть меню' if collapsed else 'Свернуть меню'
+        self.sidebar_toggle.setToolTip(label)
+        self.sidebar_toggle.setAccessibleName(label)
+        if persist and self.isVisible() and self.sidebar.width() != target:
+            self._sidebar_labels(True)
+            self.sidebar_animation.setStartValue(self.sidebar.width())
+            self.sidebar_animation.setEndValue(target)
+            self.sidebar_animation.start()
+        else:
+            self.sidebar.setFixedWidth(target)
+            self._finish_sidebar_animation()
+        if persist and self.settings is not None:
+            self.settings.setValue('window/sidebar_collapsed', bool(collapsed))
+
     def _navigation_changed(self, index):
         titles = (('Обзор','Наблюдения и динамика состояния'),
                   ('Аналитика','Сводки, сравнения и дневные значения'),
@@ -306,7 +449,7 @@ class MainWindow(QMainWindow):
                   ('Настройки','Резервные копии и сохранность данных'))
         self.page_title.setText(titles[index][0])
         self.page_subtitle.setText(titles[index][1])
-        self.page_subtitle.setVisible(index != 0)
+        self.page_subtitle.hide()
         if index == 3:
             self.backup_page.activate()
         if index == 1:
@@ -562,7 +705,7 @@ class MainWindow(QMainWindow):
         try:
             dialog = dialog_type(self.application.observations, record_id=record_id, parent=self)
         except StorageError:
-            QMessageBox.warning(self, "Не удалось открыть запись", "Запись недоступна. Проверьте хранилище.")
+            show_warning(self, "Не удалось открыть запись", "Запись недоступна. Проверьте хранилище.")
             return
         if record_id is None and entry_date is not None:
             self._prefill_diary_date(dialog, entry_date)
@@ -625,7 +768,7 @@ class MainWindow(QMainWindow):
         self.last_saved_action.setEnabled(available and bool(self.last_saved_action.data()))
         for button in (self.cognitive_button, self.physical_button):
             button.setEnabled(available)
-            button.setToolTip("" if available else "Хранилище недоступно.")
+            button.setToolTip(button.accessibleName() if available else "Хранилище недоступно.")
         for name in ("Настроение", "Стресс", "Стресса нет", "Сон", "Питание", "Спортзал"):
             self.add_actions[name].setEnabled(available and (name != "Стресса нет" or not self._quick_stress_pending))
         if self.application is None:
@@ -649,6 +792,7 @@ class MainWindow(QMainWindow):
             geometry = self.settings.value("window/geometry", QByteArray())
             if isinstance(geometry, QByteArray) and not geometry.isEmpty():
                 self.restoreGeometry(geometry)
+                self.setWindowState(self.windowState() & ~Qt.WindowState.WindowFullScreen)
         # Не оставлять окно за отключённым монитором или за краями экрана.
         screens = QApplication.screens()
         target = next((s.availableGeometry() for s in screens
@@ -672,6 +816,8 @@ class MainWindow(QMainWindow):
         self.status.setText("Не удалось загрузить график. Проверьте файлы приложения.")
 
     def closeEvent(self, event) -> None:
+        self.chart_settings_popup.hide()
+        self.sidebar_animation.stop()
         dialog = getattr(self, "active_dialog", None)
         if dialog is not None:
             try:
@@ -729,8 +875,9 @@ class MainWindow(QMainWindow):
             event.ignore()
             return
         if self.settings is not None:
-            self.settings.setValue("window/geometry", self.saveGeometry())
-            self.settings.setValue("window/maximized", self.isMaximized())
+            fullscreen = self.isFullScreen() and not self._fullscreen_geometry.isEmpty()
+            self.settings.setValue("window/geometry", self._fullscreen_geometry if fullscreen else self.saveGeometry())
+            self.settings.setValue("window/maximized", bool(self._fullscreen_state & Qt.WindowState.WindowMaximized) if fullscreen else self.isMaximized())
             self.settings.sync()
         self.chart.release()
         self.analytics_page.release()

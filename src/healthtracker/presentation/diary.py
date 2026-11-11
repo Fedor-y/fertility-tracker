@@ -2,21 +2,54 @@
 from zoneinfo import ZoneInfo
 from html import escape
 
-from PySide6.QtCore import QDate, QTimeZone, QTimer, Qt, Signal
-from PySide6.QtGui import QKeySequence, QShortcut, QFont
+from PySide6.QtCore import QDate, QSize, QRect, QTimeZone, QTimer, Qt, Signal
+from PySide6.QtGui import QColor, QKeySequence, QShortcut, QFont
 from PySide6.QtWidgets import (
     QAbstractItemView, QDateEdit, QHeaderView, QHBoxLayout, QLabel, QMenu,
     QMessageBox, QPushButton, QToolButton, QTreeWidget, QTreeWidgetItem,
-    QVBoxLayout, QWidget,
+    QVBoxLayout, QWidget, QScrollArea, QStyledItemDelegate, QStyle,
 )
 from healthtracker.application.diary import KINDS, TITLES
-from healthtracker.presentation.theme import role
+from healthtracker.presentation.theme import role, icon_button, action_icon, style_calendar, style_message_box
 from healthtracker.application.errors import RecordNotFound, StorageError
 from healthtracker.domain.errors import DomainValidationError
 
 
 def system_zone():
     return ZoneInfo(bytes(QTimeZone.systemTimeZoneId()).decode())
+
+
+class DiaryDelegate(QStyledItemDelegate):
+    """Две строки ленты; исходные колонки и UserRole сохраняют полный текст."""
+    def sizeHint(self, option, index):
+        return QSize(200,68 if index.data(Qt.ItemDataRole.UserRole) is not None else 34)
+
+    def paint(self,painter,option,index):
+        entry=index.data(Qt.ItemDataRole.UserRole)
+        if entry is None:
+            super().paint(painter,option,index)
+            return
+        painter.save()
+        rect=option.rect.adjusted(0,2,0,-2)
+        selected=bool(option.state & QStyle.StateFlag.State_Selected)
+        hovered=bool(option.state & QStyle.StateFlag.State_MouseOver)
+        painter.fillRect(rect,QColor('#141414' if selected else '#0b0b0b' if hovered else '#030303'))
+        if selected:
+            painter.fillRect(QRect(rect.left(),rect.top()+10,2,rect.height()-20),QColor('#a0a0a0'))
+        names={'cognitive':'brain','physical':'biceps','stress':'stress','mood':'mood','sleep':'sleep','meals':'meal','gym':'gym'}
+        action_icon(names[entry.kind]).paint(painter,QRect(rect.left()+12,rect.top()+18,22,22))
+        x=rect.left()+47
+        font=QFont(option.font);font.setWeight(QFont.Weight.DemiBold);painter.setFont(font)
+        painter.setPen(QColor('#ededed'))
+        title=TITLES[entry.kind]
+        painter.drawText(QRect(x,rect.top()+7,rect.width()-65,23),Qt.AlignmentFlag.AlignVCenter,title)
+        painter.setFont(option.font);painter.setPen(QColor('#929292'))
+        time=index.data()[:5] if entry.moment is not None else 'Без времени'
+        summary=index.siblingAtColumn(2).data().replace('\n',' ')
+        text=time+' · '+summary
+        text=option.fontMetrics.elidedText(text,Qt.TextElideMode.ElideRight,max(0,rect.width()-65))
+        painter.drawText(QRect(x,rect.top()+32,rect.width()-65,23),Qt.AlignmentFlag.AlignVCenter,text)
+        painter.restore()
 
 
 class DiaryPage(QWidget):
@@ -34,15 +67,17 @@ class DiaryPage(QWidget):
         layout.setContentsMargins(0,6,0,0)
         layout.setSpacing(12)
         toolbar = QHBoxLayout()
-        toolbar.addWidget(QLabel("Дата дневника"))
+        toolbar.setSpacing(8)
         self.entry_date = QDateEdit(QDate.currentDate())
         self.entry_date.setDateRange(QDate(1,1,1), QDate(9999,12,31))
         self.entry_date.setCalendarPopup(True)
         self.entry_date.setDisplayFormat("dd.MM.yyyy")
         self.entry_date.setAccessibleName("Дата дневника")
+        self.entry_date.setFixedWidth(145)
+        style_calendar(self.entry_date)
         toolbar.addWidget(self.entry_date)
         self.add_button = QToolButton()
-        self.add_button.setText("Добавить за эту дату")
+        icon_button(self.add_button,"plus","Добавить за эту дату")
         self.add_menu = QMenu(self.add_button)
         self.add_actions = {}
         for kind in KINDS:
@@ -53,7 +88,9 @@ class DiaryPage(QWidget):
         self.add_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         toolbar.addWidget(self.add_button)
         self.refresh_button = QPushButton("Обновить")
+        icon_button(self.refresh_button,"refresh","Обновить дневник")
         toolbar.addWidget(self.refresh_button)
+        toolbar.addStretch()
         layout.addLayout(toolbar)
         self.zone_notice = QLabel()
         self.zone_notice.setWordWrap(True)
@@ -66,14 +103,30 @@ class DiaryPage(QWidget):
         self.records.setHeaderLabels(["Местное время", "Тип записи", "Краткое содержание"])
         self.records.setRootIsDecorated(False)
         self.records.setWordWrap(True)
-        self.records.setAlternatingRowColors(True)
+        self.records.setObjectName('diaryFeed')
+        self.records.setAlternatingRowColors(False)
+        self.records.setHeaderHidden(True)
+        self.records.setMouseTracking(True)
+        self.records.setItemDelegate(DiaryDelegate(self.records))
+        self.records.setColumnHidden(1,True)
+        self.records.setColumnHidden(2,True)
         self.records.setIndentation(12)
         self.records.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.records.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.records.header().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        self.records.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.records.header().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         self.records.header().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
         layout.addWidget(self.records,1)
+        self.details=QLabel()
+        self.details.setTextFormat(Qt.TextFormat.PlainText)
+        self.details.setWordWrap(True)
+        self.details.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.details_scroll=QScrollArea()
+        self.details_scroll.setWidgetResizable(True)
+        self.details_scroll.setMaximumHeight(110)
+        self.details_scroll.setWidget(self.details)
+        self.details_scroll.hide()
+        layout.addWidget(self.details_scroll)
         actions = QHBoxLayout()
         self.open_button = QPushButton("Открыть / изменить")
         self.delete_button = QPushButton("Удалить")
@@ -104,6 +157,11 @@ class DiaryPage(QWidget):
         available = self.selected() is not None and self.service is not None and not self._deleting
         self.open_button.setEnabled(available)
         self.delete_button.setEnabled(available)
+        self.open_button.setVisible(available)
+        self.delete_button.setVisible(available)
+        entry=self.selected()
+        self.details_scroll.setVisible(entry is not None)
+        self.details.setText(entry.summary if entry is not None else '')
 
     def _zone(self):
         current = self.zone_provider()
@@ -134,6 +192,7 @@ class DiaryPage(QWidget):
             self.records.addTopLevelItem(group)
             group.setFirstColumnSpanned(True)
             group.setExpanded(True)
+            group.setHidden(not bool(entries))
             if not entries:
                 empty = QTreeWidgetItem(["Нет сведений"])
                 empty.setFlags(Qt.ItemFlag.ItemIsEnabled)
@@ -142,14 +201,15 @@ class DiaryPage(QWidget):
                 text = entry.moment.astimezone(self.zone).strftime("%H:%M:%S %z") if entry.moment is not None else "Без времени"
                 item = QTreeWidgetItem([text,TITLES[entry.kind],entry.summary])
                 item.setData(0,Qt.ItemDataRole.UserRole,entry)
+                item.setData(0,Qt.ItemDataRole.AccessibleTextRole,TITLES[entry.kind]+" · "+text+" · "+entry.summary)
                 item.setToolTip(2,'<qt>'+escape(entry.summary).replace('\n','<br>')+'</qt>')
                 if entry.moment is not None:
                     item.setToolTip(0,entry.moment.astimezone(self.zone).isoformat())
                 group.addChild(item)
                 if (entry.kind,entry.id)==previous_key:
                     self.records.setCurrentItem(item)
-        self.status.setText("Записей за эту дату нет. Отсутствие сведений не означает нулевые оценки или отрицательные ответы."
-                            if not day.timed and not day.untimed else "Выберите запись для просмотра, исправления или удаления.")
+        self.status.setText("Записей пока нет"
+                            if not day.timed and not day.untimed else f"Записей: {len(day.timed)+len(day.untimed)}")
         self._selection_changed()
         return True
 
@@ -173,6 +233,7 @@ class DiaryPage(QWidget):
         box.button(QMessageBox.StandardButton.Yes).setText("Удалить")
         box.button(QMessageBox.StandardButton.No).setText("Отмена")
         box.setDefaultButton(QMessageBox.StandardButton.No)
+        style_message_box(box)
         return box.exec()==QMessageBox.StandardButton.Yes
 
     def delete_selected(self):

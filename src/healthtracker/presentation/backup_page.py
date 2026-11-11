@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
 
 from healthtracker.application.backups import BackupPhase, BackupRequest
 from healthtracker.application.restoration import RestoreRequest
-from healthtracker.presentation.theme import role
+from healthtracker.presentation.theme import role, Disclosure, quiet_table, icon_button, action_icon, style_message_box
 
 DIRECTORY_KEY = 'backup/directory'
 
@@ -66,17 +66,20 @@ class BackupPage(QWidget):
         heading = label('Резервные копии')
         role(heading,'sectionTitle')
         layout.addWidget(heading)
-        layout.addWidget(label('Сохраните проверенную копию своих записей в отдельной папке.'))
+        heading.setToolTip('Проверенные локальные копии и восстановление с защитной копией текущих данных.')
         self.directory_label = label()
         self.directory_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        layout.addWidget(self.directory_label)
+        self.directory_details=Disclosure("Каталог сохранения",self.directory_label)
+        layout.addWidget(self.directory_details)
         controls = QHBoxLayout()
         self.create_button = QPushButton('Создать резервную копию')
         self.create_button.setObjectName('createBackup')
         self.create_button.setProperty('kind','primary')
+        self.create_button.setIcon(action_icon('archive'))
         self.create_button.clicked.connect(self.create)
         controls.addWidget(self.create_button)
         self.refresh_button = QPushButton('Обновить список')
+        icon_button(self.refresh_button,'refresh','Обновить список копий')
         self.refresh_button.clicked.connect(self.refresh)
         controls.addWidget(self.refresh_button)
         controls.addStretch()
@@ -104,13 +107,14 @@ class BackupPage(QWidget):
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        self.table.verticalHeader().hide()
+        quiet_table(self.table)
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.table.setMinimumHeight(160)
-        self.table.setMaximumHeight(280)
+        self.table.setMaximumHeight(320)
         self.table.itemSelectionChanged.connect(self._controls)
         layout.addWidget(self.table, 1)
         self.open_button = QPushButton('Открыть расположение копии')
+        icon_button(self.open_button,'folder','Открыть расположение копии')
         self.open_button.clicked.connect(self.open_location)
         actions = QHBoxLayout()
         actions.addWidget(self.open_button)
@@ -124,7 +128,8 @@ class BackupPage(QWidget):
         self.restart_button.clicked.connect(self.close_requested.emit)
         self.restart_button.hide()
         layout.insertWidget(layout.indexOf(self.status) + 1, self.restart_button, 0, Qt.AlignmentFlag.AlignLeft)
-        layout.addWidget(label('При создании выберите папку. Старые копии остаются на своих местах.'))
+        note=role(label('При создании выберите папку. Старые копии остаются на своих местах.'),'secondary')
+        layout.addWidget(note)
         layout.addStretch(1)
         scroll.setWidget(body)
         self.timer = QTimer(self)
@@ -137,6 +142,8 @@ class BackupPage(QWidget):
         self._controls()
 
     def _directory_text(self):
+        self.directory_details.toggle.setText("Каталог · "+self.directory.name if self.directory else "Каталог не задан")
+        self.directory_label.setToolTip(str(self.directory) if self.directory else '')
         self.directory_label.setText(f'Каталог копий: {self.directory}' if self.directory is not None
                                      else 'Каталог копий не задан.')
 
@@ -212,12 +219,17 @@ class BackupPage(QWidget):
             return
         result = self.results[self.table.currentRow()]
         metadata = result.metadata
-        answer = QMessageBox.warning(self, 'Восстановить резервную копию?',
+        box = QMessageBox(QMessageBox.Icon.Warning,'Восстановить резервную копию?',
             'Текущие данные будут полностью заменены выбранной копией.\n\n'
             f'Дата: {metadata.created_at_utc.astimezone().strftime("%d.%m.%Y %H:%M:%S")}\n'
             f'Размер: {file_size(metadata.size_bytes)}\nСтатус: {self.table.item(self.table.currentRow(), 2).text()}, перед заменой будет повторная проверка.\n\n'
             'Сначала будет сохранена копия текущего состояния. После операции потребуется перезапуск.',
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,self)
+        box.button(QMessageBox.StandardButton.Yes).setText('Восстановить')
+        box.button(QMessageBox.StandardButton.No).setText('Отмена')
+        box.setDefaultButton(QMessageBox.StandardButton.No)
+        style_message_box(box)
+        answer=box.exec()
         if answer != QMessageBox.StandardButton.Yes:
             return
         self._restore_preparing = True
@@ -246,12 +258,15 @@ class BackupPage(QWidget):
 
     def _render(self, *, verified=True):
         self.table.setRowCount(len(self.results))
+        self.table.setMinimumHeight(0)
+        self.table.setFixedHeight(self.table.horizontalHeader().height()+max(1,min(6,len(self.results)))*38+8)
         for row, result in enumerate(self.results):
             value = result.metadata
             texts = (value.created_at_utc.astimezone().strftime('%d.%m.%Y %H:%M:%S'),
                      file_size(value.size_bytes), 'Проверена' if verified else 'Проверка не обновлена')
             for column, text in enumerate(texts):
                 item = QTableWidgetItem(text)
+                if column==0:item.setIcon(action_icon('archive'))
                 item.setToolTip(str(result.directory))
                 self.table.setItem(row, column, item)
         self.summary.setText(f'Проверенных копий: {len(self.results)}' if verified else 'Список не удалось проверить повторно.')

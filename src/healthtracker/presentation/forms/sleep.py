@@ -1,6 +1,7 @@
 """Ночной сон: два момента, производная длительность, подтверждение >16 ч."""
 from PySide6.QtWidgets import QLabel, QMessageBox
 
+from healthtracker.presentation.theme import style_message_box
 from healthtracker.domain.errors import DomainValidationError
 from healthtracker.presentation.forms.common import EntryDialog, MomentInput, SaveCancelled
 
@@ -50,6 +51,7 @@ class SleepDialog(EntryDialog):
         box.button(QMessageBox.StandardButton.Yes).setText("Сохранить")
         box.button(QMessageBox.StandardButton.No).setText("Вернуться к форме")
         box.setDefaultButton(QMessageBox.StandardButton.No)
+        style_message_box(box)
         return box.exec() == QMessageBox.StandardButton.Yes
 
     def persist(self):

@@ -21,6 +21,7 @@ def controls(channel,qtbot):
     panel=window.chart_controls
     window._request_controls()  # Начальный запрос, без нажатия скрытого сброса.
     wait(qtbot,window)
+    window.chart_settings_button.click()
     return window,db,c,b,panel
 
 
@@ -44,6 +45,8 @@ def settle_picture(qtbot,window):
 
 
 def choose(qtbot,combo,key):
+    if not combo.isVisible() and hasattr(combo.window(),"chart_settings_popup"):
+        combo.window().chart_settings_popup.show_for_anchor()
     index=combo.findData(key)
     assert index>=0
     combo.setFocus()

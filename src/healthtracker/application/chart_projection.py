@@ -112,10 +112,15 @@ def project_chart(chart, *, show_events=True):
     maximum = (end - origin).total_seconds() if real else days * (1 if daily else 86400)
     step = (10800 if mode is ChartMode.DAY else 43200) if real else (max(1, ceil(days / 10)) if daily else 21600)
     ticks = []
-    for i in range(int(maximum // step) + 1):
-        x = i * step
+    # Только представление оси: локальные целые часы из реальных UTC-моментов.
+    # Четверть часа покрывает и получасовые DST-сдвиги без выдуманных часов.
+    tick_step = 900 if real else step
+    for i in range(int(maximum // tick_step) + 1):
+        x = i * tick_step
         if real:
             local = (origin + timedelta(seconds=x)).astimezone(zone)
+            if local.minute or local.second:
+                continue
             label = local.strftime('%d.%m\n%H:%M %z')
         elif daily:
             label = (period.start + timedelta(days=int(x))).strftime('%d.%m.%Y') if x < maximum else ''

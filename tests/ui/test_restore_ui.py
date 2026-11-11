@@ -48,14 +48,15 @@ def ui(qtbot,tmp_path):
 
 
 def confirm(monkeypatch,selected,yes=True):
-    def dialog(parent,title,text,buttons,default):
+    def dialog(box):
+        text=box.text()
         assert 'полностью заменены' in text
         assert selected.metadata.created_at_utc.astimezone().strftime('%d.%m.%Y %H:%M:%S') in text
         assert file_size(selected.metadata.size_bytes) in text
         assert 'Статус:' in text
-        assert default==QMessageBox.StandardButton.No
+        assert box.standardButton(box.defaultButton())==QMessageBox.StandardButton.No
         return QMessageBox.StandardButton.Yes if yes else QMessageBox.StandardButton.No
-    monkeypatch.setattr(QMessageBox,'warning',dialog)
+    monkeypatch.setattr(QMessageBox,'exec',dialog)
 
 
 def click_restore(qtbot,page):

@@ -303,7 +303,7 @@ def test_missing_record_open_and_graph_failure_not_diary_failure(qtbot,services,
     window.navigation.setCurrentRow(2);window.diary.entry_date.setDate(QDate(DAY))
     select(window.diary,'mood');diary.delete('mood',ids['mood'],confirmed=True)
     messages=[]
-    monkeypatch.setattr(QMessageBox,'warning',lambda *args:messages.append(args[1]))
+    monkeypatch.setattr('healthtracker.presentation.main_window.show_warning',lambda *args:messages.append(args[1]))
     window.diary.open_selected()
     assert messages
     window.chart.failed.emit();window.diary.refresh()

@@ -4,7 +4,7 @@ from dataclasses import fields, replace
 from PySide6.QtCore import QAbstractTableModel, QDate, QModelIndex, QSignalBlocker, QTimer, Qt, Signal
 from PySide6.QtWidgets import (
     QComboBox, QDateEdit, QGridLayout, QHBoxLayout, QLabel, QPushButton, QPlainTextEdit,
-    QScrollArea, QTabWidget, QTableView, QVBoxLayout, QWidget,
+    QScrollArea, QTabWidget, QToolButton, QTableView, QVBoxLayout, QWidget,
 )
 
 from healthtracker.application.analytics_page import AnalyticsPagePreparation, AnalyticsQuery
@@ -17,7 +17,8 @@ from healthtracker.domain.periods import ComparisonPeriod, DateRange, PeriodPair
 from healthtracker.presentation.chart import ChartView
 from healthtracker.presentation.chart_controller import ChartController
 from healthtracker.presentation.chart_controls import ChartControls
-from healthtracker.presentation.theme import SummaryCards, role
+from healthtracker.presentation.theme import SummaryCards, role, Disclosure, quiet_table, compact_combo, icon_button, style_calendar
+from healthtracker.presentation.chart_settings_popup import ChartSettingsPopup
 
 
 def text_label(text):
@@ -54,7 +55,7 @@ def table(headers, rows, name, parent):
     view.setModel(TextTable(headers,rows,view))
     view.setMinimumWidth(0)
     view.setMinimumHeight(160)
-    view.setAlternatingRowColors(True)
+    quiet_table(view)
     view.horizontalHeader().setStretchLastSection(True)
     view.setColumnWidth(0,180)
     return view
@@ -62,12 +63,14 @@ def table(headers, rows, name, parent):
 
 class AnalyticsControls(ChartControls):
     def __init__(self,today,parent=None):
-        super().__init__(today,parent)
+        super().__init__(today,parent,floating=True)
         with QSignalBlocker(self.period):
             self.period.addItem('Текущая неделя до сегодня','week')
             self.period.setCurrentIndex(self.period.findData(QuickPeriod.MONTH))
         # Аналитическая динамика всегда дневная; почасовые режимы — в Обзоре.
         self.mode.hide()
+        self.mode_label.hide()
+        self.reset_zoom.hide()
 
     def period_for(self,context):
         if self.period.currentData()=='week':
@@ -80,7 +83,8 @@ class AnalyticsSections(QWidget):
         super().__init__(parent)
         layout=QVBoxLayout(self)
         self.caption=text_label(view.caption)
-        layout.addWidget(self.caption)
+        self.caption.setProperty("role","secondary")
+        layout.addWidget(Disclosure("О показателях и периоде",self.caption))
         self.tabs=QTabWidget()
         self.tabs.setMinimumHeight(280)
         layout.addWidget(self.tabs)
@@ -88,13 +92,14 @@ class AnalyticsSections(QWidget):
         self.daily_table=table(DAILY_HEADERS,view.daily_rows,'Дневные значения выбранного показателя',self)
         summary=QWidget();summary_layout=QVBoxLayout(summary)
         self.cards=SummaryCards(view.summary_rows,summary)
+        self.cards.setToolTip(view.caption)
         summary_layout.addWidget(self.cards)
-        summary_layout.addWidget(self.summary_table)
+        summary_layout.addWidget(Disclosure("Статистика и даты экстремумов",self.summary_table))
         self.extrema=QPlainTextEdit()
         self.extrema.setReadOnly(True)
         self.extrema.setAccessibleName('Полные даты экстремумов выбранной строки')
         self.extrema.setMinimumHeight(100)
-        summary_layout.addWidget(self.extrema)
+        summary_layout.addWidget(Disclosure("Даты выбранного показателя",self.extrema))
         self.summary_table.selectionModel().currentRowChanged.connect(
             lambda current,previous:self.extrema.setPlainText(view.extrema[current.row()]) if current.isValid() else None)
         self.summary_table.selectRow(view.selected_row)
@@ -110,7 +115,7 @@ class AnalyticsSections(QWidget):
             heading=role(text_label(title),'sectionTitle')
             body.addWidget(heading);body.addWidget(label)
         self.exclusions_table=table(('Исключённая дата','Причины'),view.exclusions,'Причины исключения дат сна',inner)
-        body.addWidget(self.exclusions_table)
+        body.addWidget(Disclosure("Исключённые даты сна",self.exclusions_table))
         body.addWidget(text_label('Спортзал'));body.addWidget(self.gym)
         scroll.setWidget(inner)
         self.tabs.addTab(scroll,'Сравнения и факторы')
@@ -145,8 +150,7 @@ class AnalyticsPage(QWidget):
         self.layout.setContentsMargins(0,6,0,0)
         self.controls=AnalyticsControls(context_provider().today,self.inner)
         self.controls.setEnabled(False)
-        self.layout.addWidget(self.controls)
-        self.layout.addWidget(text_label('Показатель ниже выбирает дневную таблицу и сравнение периодов. Ряды графика включаются отдельно.'))
+
         row=QHBoxLayout()
         self.indicator=QComboBox()
         self.indicator.setAccessibleName('Показатель аналитики')
@@ -157,32 +161,59 @@ class AnalyticsPage(QWidget):
         self.comparison.setAccessibleName('Сравнение периодов')
         for key,title in (('none','Без сравнения'),('week','Текущая неделя с предыдущей'),('month','Текущий месяц с предыдущим'),('custom','Два диапазона')):
             self.comparison.addItem(title,key)
-        row.addWidget(self.indicator,1);row.addWidget(self.comparison,1)
+        compact_combo(self.indicator)
+        compact_combo(self.comparison)
+        self.indicator.setMaximumWidth(290)
+        self.indicator.setMinimumWidth(180)
+        self.period_button=QPushButton(self.controls.period.currentText())
+        self.period_button.setToolTip('Выбрать период и параметры аналитики')
+        self.settings_button=icon_button(QToolButton(),'gear','Параметры аналитики')
+        self.settings_button.setCheckable(True)
+        row.addWidget(self.period_button);row.addWidget(self.settings_button);row.addStretch()
         self.layout.addLayout(row)
         self.custom_comparison=QWidget()
         dates=QGridLayout(self.custom_comparison)
         self.ranges=[]
         for i,title in enumerate(('Первый период','Второй период')):
-            dates.addWidget(text_label(title),i,0)
+            dates.addWidget(text_label(title),i*2,0,1,2)
             pair=[]
             for j,label in enumerate(('Начало','Конец')):
                 field=QDateEdit(QDate(context_provider().today))
                 field.setCalendarPopup(True);field.setDisplayFormat('dd.MM.yyyy')
                 field.setDateRange(QDate(1,1,1),QDate(9999,12,31))
                 field.setAccessibleName(title+' · '+label)
-                dates.addWidget(field,i,j+1);pair.append(field)
+                dates.addWidget(field,i*2+1,j);pair.append(field)
             self.ranges.append(tuple(pair))
         self.apply_comparison=QPushButton('Применить сравнение')
-        dates.addWidget(self.apply_comparison,2,0,1,3)
-        self.layout.addWidget(self.custom_comparison);self.custom_comparison.hide()
+        dates.addWidget(self.apply_comparison,4,0,1,2)
+        params=self.controls.layout()
+        params.addWidget(text_label('Сравнение периодов'))
+        params.addWidget(self.comparison)
+        params.addWidget(self.custom_comparison)
+        self.custom_comparison.hide()
+        self.settings_popup=ChartSettingsPopup(self.controls,self.settings_button,self.window())
+        self.settings_popup.findChild(QLabel).setText('Параметры аналитики')
+        def toggle_settings():
+            if self.settings_popup.isVisible():self.settings_popup.hide()
+            else:self.settings_popup.show_for_anchor()
+        self.settings_button.clicked.connect(toggle_settings)
+        self.period_button.clicked.connect(toggle_settings)
+        self.controls.period.currentIndexChanged.connect(
+            lambda:self.period_button.setText(self.controls.period.currentText()))
+        self.range_label=role(text_label(""),"secondary")
+        self.layout.addWidget(self.range_label)
+        self.layout.addWidget(self.indicator,0,Qt.AlignmentFlag.AlignLeft)
+        for pair in self.ranges:
+            for field in pair:style_calendar(field)
         self.status=role(text_label('Откройте страницу для загрузки аналитики.'),'secondary')
         self.layout.addWidget(self.status)
         self.retry=QPushButton('Повторить запрос аналитики')
         self.retry.clicked.connect(self.request)
-        self.layout.addWidget(self.retry)
+        self.layout.addWidget(self.retry,0,Qt.AlignmentFlag.AlignLeft)
+        self.retry.hide()
         self.placeholder=text_label('Сводки и дневные значения появятся после получения снимка.')
         self.layout.addWidget(self.placeholder)
-        self.chart_heading=role(text_label('Дневная динамика, сон и спортзал'),'sectionTitle')
+        self.chart_heading=role(text_label('Динамика и факторы'),'sectionTitle')
         self.layout.addWidget(self.chart_heading)
         self.scroll.setWidget(self.inner)
         self.controls.changed.connect(self._changed)
@@ -228,6 +259,7 @@ class AnalyticsPage(QWidget):
 
     def deactivate(self):
         self.active=False
+        self.settings_popup.hide()
         if self.controller:self.controller.invalidate()
 
     def _ensure_chart(self):
@@ -275,13 +307,15 @@ class AnalyticsPage(QWidget):
         if self.sections:self.sections.setEnabled(False)
         if self._pending:
             self._pending[1].deleteLater();self._pending=None
-        self.status.setText('Данные обновляются; прежний снимок не является актуальным.')
+        self.status.setText('Обновляем данные…')
 
     def _state(self,state):
+        self.retry.setVisible(state in ('error','stale','closed'))
         if state=='confirmed':
             if self.sections and self._shown_request==self.controller.requests.latest_id:
                 self.sections.setEnabled(True)
-            self.status.setText('Снимок проверен на момент подтверждения. Каждый день имеет одинаковый вес.')
+            self.status.setText('')
+            self.status.setToolTip('Снимок проверен на момент подтверждения. Каждый день имеет одинаковый вес.')
         elif state in ('error','stale','checking','closed','updating','sent'):
             if self.sections:self.sections.setEnabled(False)
             self.status.setText('Данные устарели. Повторите запрос.' if state!='error' else 'Ошибка графика или загрузки. Прежнее отображение сохранено; повторите запрос.')
@@ -308,6 +342,8 @@ class AnalyticsPage(QWidget):
             self.layout.replaceWidget(old,built)
             old.hide()
             if self.sections:old.deleteLater()
+            period=self.controller.last_query.period
+            self.range_label.setText(period.start.strftime("%d.%m.%Y")+" — "+period.end.strftime("%d.%m.%Y"))
             self.sections=built
             self._shown_request=self.controller.last_request_id
             built.setEnabled(True);built.show()
@@ -325,6 +361,7 @@ class AnalyticsPage(QWidget):
 
     def close_bridge(self):
         self.closing=True
+        self.settings_popup.hide()
         if self.chart:self.chart.bridge.close()
 
     def begin_close(self):

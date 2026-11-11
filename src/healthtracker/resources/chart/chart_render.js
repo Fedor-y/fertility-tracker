@@ -9,6 +9,52 @@ window.HealthTrackerRenderer = function (root, eventRoot, openSource) {
     let paintCount = 0;
     let renderMs = 0;
     chart.on("rendered", () => { paintCount += 1; });
+    let timeLabelIds = [];
+    // Подписи overlay используют только готовые Python x/локальный текст.
+    function refreshTimeLabels() {
+        const view = last && last.data.view;
+        const children = [];
+        if (view && ["day", "timeline"].includes(view.mode)) {
+            const grid = chart.getModel().getComponent("grid", 0).coordinateSystem.getRect();
+            const extent = chart.getModel().getComponent("xAxis", 0).axis.scale.getExtent();
+            const pixel = x => chart.convertToPixel({xAxisIndex: 0}, x);
+            const ticks = view.axis.ticks.map(t => ({x: t.x, date: t.text.split("\n")[0],
+                hour: Number((t.text.split("\n")[1] || "").slice(0, 2))}))
+                .filter(t => t.x < view.axis.max && Number.isInteger(t.hour) && t.hour >= 0 && t.hour < 24);
+            const visible = ticks.filter(t => t.x >= extent[0] && t.x <= extent[1]);
+            let hours = [];
+            for (const step of [3, 4, 6, 12, 24]) {
+                hours = visible.filter(t => t.hour % step === 0);
+                if (hours.every((t, i) => !i || pixel(t.x)-pixel(hours[i-1].x) >= 28)) break;
+            }
+            const add = (id, x, y, text, color, weight, align) => children.push({id, type: "text", silent: true,
+                x, y, style: {text, fill: color, font: `${weight} 11px "Noto Sans", sans-serif`,
+                    align, verticalAlign: "middle"}});
+            let previous = -Infinity;
+            for (const tick of hours) {
+                const x = pixel(tick.x);
+                if (x-previous < 28) continue;
+                add(`hour-${tick.x}`, x, grid.y+grid.height+9, String(tick.hour), "#e5e5e5", 600, "center");
+                previous = x;
+            }
+            previous = -Infinity;
+            for (let i=0; i<view.axis.boundaries.length; i++) {
+                const start = view.axis.boundaries[i], end = view.axis.boundaries[i+1] ?? view.axis.max;
+                if (end <= extent[0] || start > extent[1]) continue;
+                const tick = ticks.find(t => t.x >= start && t.x < end);
+                if (!tick) continue;
+                const x = pixel(Math.max(start, extent[0]));
+                if (x-previous < 72 || x+36 > grid.x+grid.width) continue;
+                add(`date-${i}`, x, grid.y+grid.height+43, tick.date.slice(0,5), "#a0a0a0", 500, "left");
+                previous = x;
+            }
+        }
+        const ids = children.map(item => item.id);
+        const removed = timeLabelIds.filter(id => !ids.includes(id)).map(id => ({id, $action: "remove"}));
+        chart.setOption({graphic: [...removed, ...children.map(item => ({...item, $action: "replace"}))]});
+        timeLabelIds = ids;
+    }
+    chart.on("datazoom", refreshTimeLabels);
     function tooltip(item) {
         const box = document.createElement("div");
         box.className = "observation-tooltip";
@@ -53,7 +99,9 @@ window.HealthTrackerRenderer = function (root, eventRoot, openSource) {
         const primary = view.series.find(row => row.kind === "cognitive" && hasValues(row))
             || view.series.find(hasValues) || view.series[0];
         const fill = new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-            {offset: 0, color: "rgba(242,242,242,0.12)"},
+            {offset: 0, color: "rgba(242,242,242,0.24)"},
+            {offset: 0.3, color: "rgba(242,242,242,0.11)"},
+            {offset: 0.6, color: "rgba(242,242,242,0.05)"},
             {offset: 1, color: "rgba(242,242,242,0)"}]);
         for (const [index, row] of view.series.entries()) {
             const leading = row === primary;
@@ -74,6 +122,14 @@ window.HealthTrackerRenderer = function (root, eventRoot, openSource) {
                     areaStyle: leading ? {color: fill, origin: 0} : undefined,
                     tooltip: {show: false}, z: leading ? 5 : 2});
             }
+        }
+        // Готовые Python-границы локальных дат: только ориентиры, не точки/сегменты.
+        // markLine сам отсекается и перемещается существующей координатной системой.
+        if (["compact", "timeline"].includes(view.mode) && series.length) {
+            const boundaries = [...new Set(view.axis.boundaries)].filter(x => x > view.axis.min && x < view.axis.max);
+            series[0].markLine = {silent: true, symbol: "none", animation: false,
+                label: {show: false}, lineStyle: {color: "#383838", width: 1, opacity: 0.65, type: "solid"},
+                emphasis: {disabled: true}, data: boundaries.map(x => ({xAxis: x}))};
         }
         const sleep = view.sleep.length > 0;
         if (sleep) series.push({id: "sleep", name: "Сон", type: "custom", renderItem: bands,
@@ -100,9 +156,10 @@ window.HealthTrackerRenderer = function (root, eventRoot, openSource) {
         const capacity = Math.max(2, Math.floor((root.clientWidth - 64) / 72));
         const stride = Math.max(1, Math.ceil(candidates.length / capacity));
         const labels = new Map(candidates.filter((_, i) => i % stride === 0).map(x => [x, tickLabels.get(x)]));
-        const axis = {type: "value", min: view.axis.min, max: view.axis.max,
+        const hourly = ["day", "timeline"].includes(view.mode);
+        const axis = {type: "value", offset: hourly ? 26 : 0, min: view.axis.min, max: view.axis.max,
             interval: view.axis.step, axisTick: {show: false},
-            axisLabel: {color: "#a0a0a0", fontSize: 11, margin: 16, hideOverlap: true,
+            axisLabel: {show: !hourly, color: "#a0a0a0", fontSize: 11, margin: 16, hideOverlap: true,
                 showMaxLabel: false, formatter: value => labels.get(value) || ""},
             splitLine: {show: false}, minorSplitLine: {show: false},
             axisLine: {show: true, onZero: false, lineStyle: {color: "#1c1c1c", width: 1}}};
@@ -119,16 +176,16 @@ window.HealthTrackerRenderer = function (root, eventRoot, openSource) {
                 formatter: value => value >= 0 && value <= 10 && value % 2 === 0 ? String(value) : ""},
             axisLine: {show: false}, axisTick: {show: false}, splitLine: {show: false}};
         const result = {animation: false, backgroundColor: "#030303",
-            textStyle: {fontFamily: "sans-serif"},
+            textStyle: {fontFamily: '"Noto Sans", "Inter", sans-serif', fontWeight: 500},
             title: [{text: view.empty ? (view.empty_text || "Нет числовых наблюдений") : "", left: "center", top: "45%",
                      textStyle: {color: "#aaa", fontSize: 13}},
                     {text: caption, left: 15, top: 8, textStyle: {color: "#666666", fontSize: 11, fontWeight: "normal"}}],
             legend: {top: compactLegend ? 8 : 40, right: 15, type: "scroll", selectedMode: false, itemGap: 14,
                 pageIconColor: "#ddd", pageIconInactiveColor: "#555", pageTextStyle: {color: "#999"},
                 textStyle: {color: "#ccc", fontSize: 11}},
-            grid: sleep ? [{left: 45, right: 20, top: compactLegend ? 64 : 88, bottom: 95},
+            grid: sleep ? [{left: 45, right: 20, top: compactLegend ? 64 : 88, bottom: hourly ? 115 : 95},
                           {left: 45, right: 20, height: 24, bottom: 25}]
-                        : [{left: 45, right: 20, top: compactLegend ? 64 : 88, bottom: 45}],
+                        : [{left: 45, right: 20, top: compactLegend ? 64 : 88, bottom: hourly ? 65 : 45}],
             xAxis: sleep ? [axis, {...axis, gridIndex: 1, axisLabel: {show: false}}] : [axis],
             yAxis: sleep ? [{...scoreAxis},
                 {type: "category", gridIndex: 1, data: ["Сон"], axisLabel: {color: "#bbb"}}]
@@ -194,6 +251,7 @@ window.HealthTrackerRenderer = function (root, eventRoot, openSource) {
             events.appendChild(block);
         }
         try {
+            timeLabelIds = [];
             chart.setOption(next, {notMerge: true, lazyUpdate: false});
         } catch (error) {
             if (lastOption) chart.setOption(lastOption, {notMerge: true});
@@ -205,6 +263,7 @@ window.HealthTrackerRenderer = function (root, eventRoot, openSource) {
         eventRoot.replaceChildren(events);
         root.classList.toggle("analytics", Boolean(view.factors));
         chart.resize();
+        refreshTimeLabels();
         root.setAttribute("aria-label", view.factors ? "Дневная динамика и сравнения сна и спортзала"
             : view.empty ? (view.empty_text || "Нет числовых наблюдений") : "График реальных наблюдений");
         renderMs = performance.now() - started;
@@ -212,28 +271,39 @@ window.HealthTrackerRenderer = function (root, eventRoot, openSource) {
     chart.setOption({animation: false, backgroundColor: "#030303", title: {text: "Нет наблюдений", textStyle: {color: "#aaa"}},
         xAxis: {type: "value", splitLine: {show: false}}, yAxis: {min: 0, max: 10, splitLine: {show: false}}, series: []});
     let resizeFrame = null;
+    let labelTimer = null;
     let sizeKey = "";
     let labelWidth = root.clientWidth;
     const observer = new ResizeObserver(() => {
         const key = root.clientWidth + ":" + root.clientHeight;
         if (key === sizeKey) return;
         sizeKey = key;
-        if (resizeFrame !== null) cancelAnimationFrame(resizeFrame);
-        resizeFrame = requestAnimationFrame(() => {
-            resizeFrame = null;
+        // При анимации только resize; полную адаптацию подписей делаем после паузы.
+        if (labelTimer !== null) clearTimeout(labelTimer);
+        labelTimer = setTimeout(() => {
+            labelTimer = null;
             if (last && labelWidth !== root.clientWidth) {
                 labelWidth = root.clientWidth;
                 lastOption = option(last.data.view);
                 // Меняются только подписи; zoom/pan остаются на месте.
                 const zoom = chart.getOption().dataZoom;
+                timeLabelIds = [];
                 chart.setOption({...lastOption, dataZoom: zoom}, {notMerge: true});
             }
             chart.resize();
+            refreshTimeLabels();
+        }, 100);
+        if (resizeFrame !== null) cancelAnimationFrame(resizeFrame);
+        resizeFrame = requestAnimationFrame(() => {
+            resizeFrame = null;
+            chart.resize();
+            refreshTimeLabels();
         });
     });
     observer.observe(root);
     window.addEventListener("pagehide", () => {
         observer.disconnect();
+        if (labelTimer !== null) clearTimeout(labelTimer);
         if (resizeFrame !== null) cancelAnimationFrame(resizeFrame);
         chart.dispose();
     });

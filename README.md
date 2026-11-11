@@ -7,7 +7,8 @@
 ## Возможности
 
 - Семь журналов: когнитивное и физическое состояние, настроение, стресс, сон, питание и спортзал.
-- Дневник с просмотром, редактированием и удалением записей.
+- Дневник в виде ленты с подробностями, редактированием и подтверждением удаления.
+- Единая чёрная тема Аналитики, настроек, резервных копий и семи форм.
 - Обзор с локальным ECharts: семь рядов, четыре режима, zoom/pan, слои и сохранение предпочтений.
 - Плавные монохромные линии через полночь с сохранением настоящих пропусков.
 - Аналитика: сводки, дневные значения, покрытие и сравнения периодов.
@@ -18,11 +19,17 @@
 Проект — рабочий прототип; переносимость на другие дистрибутивы не гарантируется.
 Ротация, расписание копий, облачная синхронизация и экспорт пока не реализованы.
 
-Последняя подтверждённая регрессия: **1200 passed**, 7 прежних предупреждений.
+Последняя подтверждённая регрессия: **1225 passed**, 7 прежних предупреждений.
 Визуальные проверки выполнены при 100%, 150% и 200%.
 Подробнее: [архитектура](docs/architecture.md),
 [текущая передача](docs/handoff.md),
-[отчёт о графике и сборке](docs/stage7_smooth_chart_report.md).
+[отчёт BLACK HOLE 4.0](docs/stage7_black_hole_4_report.md).
+
+Настройки графика открываются шестерёнкой рядом с мозгом, бицепсом и плюсом.
+Внутри — период, режим, даты, ряды и слои; Escape закрывает панель.
+
+F11 включает и выключает полный экран; Esc выходит из него. Кнопка полного экрана
+находится вверху боковой панели. После выхода восстанавливается прежний режим окна.
 
 ## Запуск подготовленного окружения
 
@@ -86,7 +93,7 @@ SQLite-тесты используют искусственные файлы в�
 
 Путь по умолчанию: `$XDG_DATA_HOME/healthtracker/healthtracker.sqlite3` либо `~/.local/share/healthtracker/healthtracker.sqlite3`. Сам расчёт пути ничего не создаёт; при обычном запуске bootstrap явно вызывает ApplicationSession.open(). Файлы ограничены владельцем. Вторая пишущая копия приложения отклоняется файловой блокировкой.
 
-Поддерживается начальная миграция `0001_initial` и повторное открытие совпадающей схемы. Существующая база сначала проверяется read-only. Обновление старой схемы **заблокировано до защитного резервирования этапа 6** по новому порядку пользователя; обходного флага нет. Неизвестная новая/изменённая схема или повреждённый файл не заменяются пустой базой. Автоматические копии и восстановление ещё не реализованы.
+Поддерживается начальная миграция `0001_initial` и повторное открытие совпадающей схемы. Существующая база сначала проверяется read-only. Обновление старой схемы **заблокировано до защитного резервирования этапа 6** по новому порядку пользователя; обходного флага нет. Неизвестная новая/изменённая схема или повреждённый файл не заменяются пустой базой. Ручные проверенные копии и базовое восстановление с перезапуском реализованы. Автоматического расписания и ротации нет.
 
 При наличии уже установленного `bwrap` можно повторить проверки с отдельным сетевым пространством без доступа к сети, не меняя сеть компьютера:
 
@@ -103,16 +110,16 @@ bwrap --unshare-net --dev-bind / / -- .venv/bin/python -m healthtracker --smoke-
 
 ```bash
 .venv/bin/python -m PyInstaller --noconfirm \
-  --distpath dist/stage7-smooth --workpath build/stage7-smooth \
+  --distpath dist/stage7-black-hole-4 --workpath build/stage7-black-hole-4 \
   packaging/healthtracker.spec
-./dist/stage7-smooth/healthtracker/healthtracker
+./dist/stage7-black-hole-4/healthtracker/healthtracker
 ```
 
 Для запуска Python/.venv/IDE не нужны. Сохраняйте всю папку
-`dist/stage7-smooth/healthtracker`, включая `_internal`; её можно перенести целиком.
+`dist/stage7-black-hole-4/healthtracker`, включая `_internal`; её можно перенести целиком.
 Бинарник запускается независимо от текущего рабочего каталога.
-Рабочие `dist/stage7-chart-fix/healthtracker`, `dist/stage7-part3/healthtracker`, `dist/stage7-part2/healthtracker` и предыдущая `dist/healthtracker` сохранены и относятся к прежним версиям приложения.
-Команда сборки выше заменяет только каталог `stage7-smooth`.
+Рабочие `dist/stage7-black-hole-3-gear/healthtracker`, `dist/stage7-black-hole-3-fullscreen/healthtracker`, `dist/stage7-black-hole-3-hours/healthtracker`, `dist/stage7-black-hole-3-compact/healthtracker`, `dist/stage7-black-hole-3-motion/healthtracker`, `dist/stage7-black-hole-3/healthtracker`, `dist/stage7-black-hole-2/healthtracker`, `dist/stage7-smooth/healthtracker`, `dist/stage7-chart-fix/healthtracker`, `dist/stage7-part3/healthtracker`, `dist/stage7-part2/healthtracker` и предыдущая `dist/healthtracker` сохранены и относятся к прежним версиям приложения.
+Команда сборки выше заменяет только каталог `stage7-black-hole-4`.
 
 База: `$XDG_DATA_HOME/healthtracker/healthtracker.sqlite3` либо
 `~/.local/share/healthtracker/healthtracker.sqlite3`.
@@ -124,7 +131,7 @@ bwrap --unshare-net --dev-bind / / -- .venv/bin/python -m healthtracker --smoke-
 Для безопасной автоматической приёмки на временных искусственных данных:
 
 ```bash
-./dist/stage7-smooth/healthtracker/healthtracker --check-bundle
+./dist/stage7-black-hole-4/healthtracker/healthtracker --check-bundle
 ```
 
 Этот режим сам изолирует XDG-пути, проверяет семь форм, графики, аналитику,

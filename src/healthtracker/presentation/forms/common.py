@@ -3,13 +3,13 @@ from datetime import UTC, date, datetime, time
 import re
 from zoneinfo import ZoneInfo
 
-from PySide6.QtCore import QDate, QDateTime, QTime, QTimeZone, Qt, Signal
+from PySide6.QtCore import QDate, QDateTime, QTime, QTimeZone, QTimer, Qt, Signal
 from PySide6.QtGui import QIcon, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QDateEdit, QDateTimeEdit, QDialog, QDialogButtonBox, QLabel, QLineEdit, QMessageBox,
     QPushButton, QScrollArea, QVBoxLayout, QWidget,
 )
-from healthtracker.presentation.theme import apply_theme, role
+from healthtracker.presentation.theme import apply_theme, role, compact_combo, style_calendar, Disclosure, style_message_box
 from healthtracker.application.errors import StorageError
 from healthtracker.domain.errors import DomainValidationError
 from healthtracker.domain.time import local_time_candidates, resolve_local_time
@@ -29,6 +29,7 @@ class ScoreChoice(QWidget):
                 self.choice.addItem(status.label, status)
         self.description = role(QLabel(),'secondary')
         self.description.setWordWrap(True)
+        self.description.hide()
         self.scale = scale
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -39,6 +40,7 @@ class ScoreChoice(QWidget):
     def _description(self):
         value = self.choice.currentData()
         self.description.setText(self.scale.describe(value) if type(value) is int else "")
+        self.description.setVisible(bool(self.description.text()))
 
     def set_value(self, value):
         self.choice.setCurrentIndex(self.choice.findData(value))
@@ -218,7 +220,7 @@ class EntryDialog(QDialog):
         self._committed = False
         self.setModal(True)
         available = QApplication.primaryScreen().availableGeometry()
-        self.resize(min(760, available.width()), min(680, max(200, available.height() - 40)))
+        self.resize(min(700, max(300,available.width()-24)), min(680, max(200, available.height() - 40)))
         outer = QVBoxLayout(self)
         outer.setContentsMargins(18,16,18,16)
         outer.setSpacing(12)
@@ -226,14 +228,18 @@ class EntryDialog(QDialog):
         self.windowTitleChanged.connect(self.title_label.setText)
         outer.addWidget(self.title_label)
         scroll = QScrollArea()
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scroll=scroll
         scroll.setWidgetResizable(True)
         self.body = QWidget()
         self.form = QVBoxLayout(self.body)
         self.form.setContentsMargins(4,4,12,10)
-        self.form.setSpacing(10)
+        self.form.setSpacing(8)
+        self.form.setAlignment(Qt.AlignmentFlag.AlignTop)
         scroll.setWidget(self.body)
         outer.addWidget(scroll)
-        self.error = QLabel()
+        self.error = role(QLabel(),"notice")
+        self.error.hide()
         self.error.setWordWrap(True)
         outer.addWidget(self.error)
         self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
@@ -250,8 +256,43 @@ class EntryDialog(QDialog):
         self.buttons.button(QDialogButtonBox.StandardButton.Save).setAutoDefault(False)
         self.buttons.button(QDialogButtonBox.StandardButton.Cancel).setAutoDefault(False)
 
+    def group_fields(self, start, stop, title, *, expanded=False):
+        """Только перенос существующих полей в раскрываемую секцию."""
+        content=QWidget()
+        layout=QVBoxLayout(content)
+        layout.setContentsMargins(0,2,0,4)
+        layout.setSpacing(8)
+        for _ in range(stop-start):
+            item=self.form.takeAt(start)
+            widget=item.widget()
+            if widget is not None:
+                layout.addWidget(widget)
+            elif item.layout() is not None:
+                layout.addLayout(item.layout())
+        section=Disclosure(title,content)
+        self.form.insertWidget(start,section)
+        section.toggle.setChecked(expanded)
+        section.toggle.toggled.connect(lambda:QTimer.singleShot(0,self._fit_content_height))
+        return section
+
+    def _fit_content_height(self):
+        limit=max(240,self.screen().availableGeometry().height()-40)
+        self.resize(self.width(),min(limit,max(320,self.body.sizeHint().height()+130)))
+
     def finish_setup(self):
+        # Одна настройка оформления для добавления и правки всех семи типов.
+        for combo in self.body.findChildren(QComboBox):
+            if not combo.property('floatingStyled'):
+                compact_combo(combo)
+                combo.setProperty('floatingStyled',True)
+        for i in range(self.form.count()):
+            label=self.form.itemAt(i).widget()
+            if isinstance(label,QLabel) and not label.property('role'):
+                role(label,'fieldTitle')
+                label.setWordWrap(True)
+        for field in self.body.findChildren(QDateTimeEdit):style_calendar(field)
         self._initial = self.state()
+        QTimer.singleShot(0,self._fit_content_height)
 
     def submit(self):
         if self._saving or self._committed:
@@ -264,7 +305,9 @@ class EntryDialog(QDialog):
             pass
         except DomainValidationError as error:
             self.error.setText(str(error))
+            self.error.show()
         except StorageError:
+            self.error.show()
             self.error.setText("Не удалось сохранить запись. Данные остались в форме. Проверьте доступ к хранилищу и повторите попытку.")
         else:
             self.record_id = record_id
@@ -276,9 +319,13 @@ class EntryDialog(QDialog):
             self.buttons.setEnabled(True)
 
     def confirm_discard(self):
-        return QMessageBox.question(self, "Несохранённые изменения", "Закрыть форму без сохранения?",
-            QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel,
-            QMessageBox.StandardButton.Cancel) == QMessageBox.StandardButton.Discard
+        box=QMessageBox(QMessageBox.Icon.Warning,"Несохранённые изменения","Закрыть форму без сохранения?",
+            QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel,self)
+        box.button(QMessageBox.StandardButton.Discard).setText("Закрыть без сохранения")
+        box.button(QMessageBox.StandardButton.Cancel).setText("Продолжить ввод")
+        box.setDefaultButton(QMessageBox.StandardButton.Cancel)
+        style_message_box(box)
+        return box.exec()==QMessageBox.StandardButton.Discard
 
     def reject(self):
         if self._committed or self.state() == self._initial or self.confirm_discard():

@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
 from healthtracker.application.errors import MealDuplicateConfirmationRequired
 from healthtracker.domain.catalogs import CaffeineStatus, MealCategory
 from healthtracker.domain.errors import DomainValidationError
+from healthtracker.presentation.theme import compact_combo, style_message_box
 from healthtracker.presentation.forms.common import EntryDialog, SaveCancelled
 
 
@@ -45,6 +46,8 @@ class MealItemEditor(QGroupBox):
         layout.addWidget(self.quantity)
         layout.addWidget(QLabel("Кофеин"))
         self.caffeine = QComboBox()
+        compact_combo(self.caffeine)
+        self.caffeine.setProperty("floatingStyled",True)
         for value, label in CAFFEINE_LABELS:
             self.caffeine.addItem(label, value.value)
         if item:
@@ -148,6 +151,7 @@ class MealDialog(EntryDialog):
         existing = box.addButton("Открыть существующую", QMessageBox.ButtonRole.ActionRole)
         cancel = box.addButton("Вернуться к форме", QMessageBox.ButtonRole.RejectRole)
         box.setDefaultButton(cancel)
+        style_message_box(box)
         box.exec()
         if box.clickedButton() is save:
             return "confirm"

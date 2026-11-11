@@ -17,7 +17,8 @@ def test_black_hole_axes_and_labels_for_all_modes(channel,qtbot,days,compact):
     seed(window)
     result=render(channel,qtbot,days=days,compact=compact)
     assert all(not axis['splitLine']['show'] for axis in result['option']['xAxis']+result['option']['yAxis'])
-    assert not any(s.get('markLine',{}).get('data') for s in result['series'])
+    marks=[s.get('markLine',{}).get('data',[]) for s in result['series']]
+    assert sum(map(len,marks)) == (days-1 if days==3 else 0)
     labels=json.loads(js(qtbot,window,"""(() => {
         const c=echarts.getInstanceByDom(document.getElementById('chart'));
         const a=c.getOption().xAxis[0];
@@ -68,6 +69,7 @@ def test_compact_overview_zoom_and_transient_notice(channel,qtbot):
     assert not window.chart_controls.info.isVisible()
     window._poll_chart_zoom()
     qtbot.waitUntil(lambda:not window.chart_controls.reset_zoom.isVisible())
+    window.chart_settings_button.click()
     js(qtbot,window,'window.healthtrackerChannel.zoom(20,70)')
     window._poll_chart_zoom()
     qtbot.waitUntil(window.chart_controls.reset_zoom.isVisible)

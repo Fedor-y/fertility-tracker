@@ -63,6 +63,7 @@ class PhysicalDialog(EntryDialog):
                     self.detail.setText(symptom.detail or "")
             self.symptom_state = old.symptom_status
         self._state_label()
+        self.symptom_section=self.group_fields(2,self.form.indexOf(self.moment)-1,"Симптомы и подробности",expanded=old is not None)
         self.finish_setup()
 
     def _state_label(self):
