@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QWidget, QScrollArea, QStyledItemDelegate, QStyle,
 )
 from healthtracker.application.diary import KINDS, TITLES
+from healthtracker.presentation.record_actions import confirm_record_delete
 from healthtracker.presentation.theme import role, icon_button, action_icon, style_calendar, style_message_box
 from healthtracker.application.errors import RecordNotFound, StorageError
 from healthtracker.domain.errors import DomainValidationError
@@ -55,7 +56,7 @@ class DiaryDelegate(QStyledItemDelegate):
 class DiaryPage(QWidget):
     open_requested = Signal(str, int)
     add_requested = Signal(str, object)
-    deleted = Signal(str, int)
+    deleted = Signal(str, object)
 
     def __init__(self, service=None, *, zone_provider=system_zone, parent=None):
         super().__init__(parent)
@@ -129,7 +130,8 @@ class DiaryPage(QWidget):
         layout.addWidget(self.details_scroll)
         actions = QHBoxLayout()
         self.open_button = QPushButton("Открыть / изменить")
-        self.delete_button = QPushButton("Удалить")
+        self.delete_button = QPushButton("Удалить запись")
+        self.delete_button.setToolTip("Выберите запись и подтвердите удаление")
         actions.addWidget(self.open_button)
         actions.addWidget(self.delete_button)
         actions.addStretch()
@@ -158,7 +160,7 @@ class DiaryPage(QWidget):
         self.open_button.setEnabled(available)
         self.delete_button.setEnabled(available)
         self.open_button.setVisible(available)
-        self.delete_button.setVisible(available)
+        self.delete_button.show()
         entry=self.selected()
         self.details_scroll.setVisible(entry is not None)
         self.details.setText(entry.summary if entry is not None else '')
@@ -227,14 +229,8 @@ class DiaryPage(QWidget):
             self.open_requested.emit(entry.kind,entry.id)
 
     def confirm_delete(self,entry):
-        box = QMessageBox(QMessageBox.Icon.Warning,"Удаление записи",
-            f"Удалить запись «{TITLES[entry.kind]}» за {self.entry_date.date().toString('dd.MM.yyyy')}? Это действие необратимо.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,self)
-        box.button(QMessageBox.StandardButton.Yes).setText("Удалить")
-        box.button(QMessageBox.StandardButton.No).setText("Отмена")
-        box.setDefaultButton(QMessageBox.StandardButton.No)
-        style_message_box(box)
-        return box.exec()==QMessageBox.StandardButton.Yes
+        return confirm_record_delete(self,entry.kind,
+                                     date_text=self.entry_date.date().toString('dd.MM.yyyy'))
 
     def delete_selected(self):
         entry = self.selected()

@@ -37,6 +37,7 @@ def check(root, *, reopen_only=False):
     from PySide6.QtCore import QDate, QEventLoop, QLibraryInfo, QSettings, QTimer
     from PySide6.QtWidgets import QApplication, QDialogButtonBox, QFileDialog, QMessageBox
     from healthtracker.application.session import ApplicationSession
+    from healthtracker.application.errors import RecordNotFound
     from healthtracker.domain.periods import QuickPeriod
     from healthtracker.domain.charts import SeriesKind
     from healthtracker.domain.chart_preferences import ChartPreferences
@@ -212,6 +213,26 @@ def check(root, *, reopen_only=False):
         assert form._committed, (kind, form.error.text())
         assert not form.isVisible()
 
+    # Реальное удаление одной дополнительной искусственной записи из формы.
+    delete_id = app.observations.save_mood(score=5, observed_at=now)
+    window.open_mood(delete_id)
+    delete_form = window.active_dialog
+    assert delete_form.delete_button.isVisible() and delete_form.delete_button.isEnabled()
+    def confirm_delete():
+        box = qt.activeModalWidget()
+        assert isinstance(box, QMessageBox)
+        assert box.standardButton(box.defaultButton()) == QMessageBox.StandardButton.No
+        box.button(QMessageBox.StandardButton.Yes).click()
+    QTimer.singleShot(0, confirm_delete)
+    delete_form.delete_button.click()
+    assert delete_form._committed and not delete_form.isVisible()
+    try:
+        app.observations.get('mood', delete_id)
+    except RecordNotFound:
+        pass
+    else:
+        raise AssertionError('Удаление из собранного приложения не выполнено')
+
     page = window.analytics_page
     page.controls.period.setCurrentIndex(page.controls.period.findData(QuickPeriod.TEN_DAYS))
     window.navigation.setCurrentRow(1)
@@ -274,7 +295,7 @@ def check(root, *, reopen_only=False):
     print(json.dumps(dict(status='ok', frozen=True, platform=qt.platformName(),
         bundled_python=sys.version.split()[0], qt_plugins=QLibraryInfo.path(QLibraryInfo.LibraryPath.PluginsPath),
         chart_resources=str(CHART_ROOT), forms_saved=7, restored_counts=restored,
-        echarts='6.0.0', backup_restore=True, reopen_settings=True,
+        echarts='6.0.0', backup_restore=True, record_deletion=True, reopen_settings=True,
         database_outside_bundle=True, loaded_from_venv=False,
         renderer_seccomp=renderer_sandbox, python_library=python_maps[0]), ensure_ascii=False), flush=True)
     return 0

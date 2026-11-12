@@ -10,7 +10,8 @@ from PySide6.QtWidgets import (
     QPushButton, QScrollArea, QVBoxLayout, QWidget,
 )
 from healthtracker.presentation.theme import apply_theme, role, compact_combo, style_calendar, Disclosure, style_message_box
-from healthtracker.application.errors import StorageError
+from healthtracker.application.errors import StorageError, RecordNotFound
+from healthtracker.presentation.record_actions import confirm_record_delete
 from healthtracker.domain.errors import DomainValidationError
 from healthtracker.domain.time import local_time_candidates, resolve_local_time
 
@@ -211,6 +212,7 @@ class SaveCancelled(Exception):
 
 class EntryDialog(QDialog):
     saved = Signal(str, int)
+    deleted = Signal(str, object)
 
     def __init__(self, service, *, record_id=None, parent=None):
         super().__init__(parent)
@@ -218,6 +220,7 @@ class EntryDialog(QDialog):
         self.service, self.record_id = service, record_id
         self._saving = False
         self._committed = False
+        self.delete_service = None
         self.setModal(True)
         available = QApplication.primaryScreen().availableGeometry()
         self.resize(min(700, max(300,available.width()-24)), min(680, max(200, available.height() - 40)))
@@ -248,6 +251,13 @@ class EntryDialog(QDialog):
         self.buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("Закрыть")
         for button in self.buttons.buttons():
             button.setIcon(QIcon())
+        self.delete_button = QPushButton('Удалить запись')
+        self.delete_button.setToolTip('Удалить эту сохранённую запись после подтверждения')
+        self.delete_button.setAutoDefault(False)
+        self.buttons.addButton(self.delete_button,QDialogButtonBox.ButtonRole.ActionRole)
+        self.delete_button.setVisible(record_id is not None)
+        self.delete_button.setEnabled(False)
+        self.delete_button.clicked.connect(self.delete_record)
         self.buttons.accepted.connect(self.submit)
         self.buttons.rejected.connect(self.reject)
         outer.addWidget(self.buttons)
@@ -313,6 +323,36 @@ class EntryDialog(QDialog):
             self.record_id = record_id
             self._committed = True
             self.saved.emit(self.kind, record_id)
+            self.accept()
+        finally:
+            self._saving = False
+            self.buttons.setEnabled(True)
+
+    def enable_deletion(self, service):
+        self.delete_service = service
+        self.delete_button.setEnabled(service is not None and self.record_id is not None)
+
+    def confirm_delete(self):
+        return confirm_record_delete(self,self.kind,unsaved=self.state()!=self._initial)
+
+    def delete_record(self):
+        if self._saving or self._committed or self.record_id is None or self.delete_service is None:
+            return
+        self._saving = True
+        self.buttons.setEnabled(False)
+        try:
+            if not self.confirm_delete():
+                return
+            self.delete_service.delete(self.kind,self.record_id,confirmed=True)
+        except RecordNotFound:
+            self.error.setText('Запись уже удалена или недоступна. Закройте окно и обновите дневник.')
+            self.error.show()
+        except (StorageError,DomainValidationError):
+            self.error.setText('Не удалось удалить запись. Данные остались в форме. Повторите попытку.')
+            self.error.show()
+        else:
+            self._committed = True
+            self.deleted.emit(self.kind,self.record_id)
             self.accept()
         finally:
             self._saving = False

@@ -21,6 +21,7 @@ from healthtracker.presentation.chart import ChartView
 from healthtracker.presentation.diary import DiaryPage, system_zone
 from healthtracker.presentation.chart_controls import ChartControls
 from healthtracker.presentation.chart_settings_popup import ChartSettingsPopup
+from healthtracker.presentation.overview_clock import OverviewClock
 from healthtracker.domain.analytics import AnalysisContext
 from healthtracker.application.charts import ChartPreparation
 from healthtracker.presentation.chart_controller import ChartController
@@ -136,7 +137,12 @@ class MainWindow(QMainWindow):
         self.page_subtitle.hide()
         header.addWidget(self.page_title)
         header.addWidget(self.page_subtitle)
-        content.addLayout(header)
+        header_grid = QGridLayout()
+        header_grid.setContentsMargins(0,0,0,0)
+        header_grid.addLayout(header,0,0)
+        self.overview_clock = OverviewClock()
+        header_grid.addWidget(self.overview_clock,0,0,Qt.AlignmentFlag.AlignHCenter)
+        content.addLayout(header_grid)
         self.storage_status = QLabel()
         self.storage_status.setObjectName("storageStatus")
         role(self.storage_status,'status')
@@ -448,6 +454,7 @@ class MainWindow(QMainWindow):
                   ('Дневник','Записи и события выбранного дня'),
                   ('Настройки','Резервные копии и сохранность данных'))
         self.page_title.setText(titles[index][0])
+        self.overview_clock.setVisible(index == 0)
         self.page_subtitle.setText(titles[index][1])
         self.page_subtitle.hide()
         if index == 3:
@@ -672,7 +679,14 @@ class MainWindow(QMainWindow):
                        mood=MoodDialog, sleep=SleepDialog, meals=MealDialog, gym=GymDialog)
         self._open_observation(classes[kind], None, entry_date=day)
 
+    def _form_deleted(self, kind, record_id):
+        self.diary.refresh()
+        self._diary_deleted(kind, record_id)
+
     def _diary_deleted(self, kind, record_id):
+        if self.last_saved_action.data() == f'{kind}:{record_id}':
+            self.last_saved_action.setData(None)
+            self.last_saved_action.setEnabled(False)
         if self.chart_controller is not None:
             self.chart_controller.invalidate()
         self._refresh_chart()
@@ -711,6 +725,8 @@ class MainWindow(QMainWindow):
             self._prefill_diary_date(dialog, entry_date)
         self.active_dialog = dialog
         dialog.saved.connect(self._observation_saved)
+        dialog.enable_deletion(self.application.diary)
+        dialog.deleted.connect(self._form_deleted)
         dialog.finished.connect(lambda: dialog.deleteLater())
         dialog.open()
 

@@ -19,7 +19,7 @@
 Проект — рабочий прототип; переносимость на другие дистрибутивы не гарантируется.
 Ротация, расписание копий, облачная синхронизация и экспорт пока не реализованы.
 
-Последняя подтверждённая регрессия: **1225 passed**, 7 прежних предупреждений.
+Последняя подтверждённая регрессия: **1238 passed**, 7 прежних предупреждений.
 Визуальные проверки выполнены при 100%, 150% и 200%.
 Подробнее: [архитектура](docs/architecture.md),
 [текущая передача](docs/handoff.md),
@@ -110,16 +110,16 @@ bwrap --unshare-net --dev-bind / / -- .venv/bin/python -m healthtracker --smoke-
 
 ```bash
 .venv/bin/python -m PyInstaller --noconfirm \
-  --distpath dist/stage7-black-hole-4 --workpath build/stage7-black-hole-4 \
+  --distpath dist/stage7-black-hole-4-delete --workpath build/stage7-black-hole-4-delete \
   packaging/healthtracker.spec
-./dist/stage7-black-hole-4/healthtracker/healthtracker
+./dist/stage7-black-hole-4-delete/healthtracker/healthtracker
 ```
 
 Для запуска Python/.venv/IDE не нужны. Сохраняйте всю папку
-`dist/stage7-black-hole-4/healthtracker`, включая `_internal`; её можно перенести целиком.
+`dist/stage7-black-hole-4-delete/healthtracker`, включая `_internal`; её можно перенести целиком.
 Бинарник запускается независимо от текущего рабочего каталога.
-Рабочие `dist/stage7-black-hole-3-gear/healthtracker`, `dist/stage7-black-hole-3-fullscreen/healthtracker`, `dist/stage7-black-hole-3-hours/healthtracker`, `dist/stage7-black-hole-3-compact/healthtracker`, `dist/stage7-black-hole-3-motion/healthtracker`, `dist/stage7-black-hole-3/healthtracker`, `dist/stage7-black-hole-2/healthtracker`, `dist/stage7-smooth/healthtracker`, `dist/stage7-chart-fix/healthtracker`, `dist/stage7-part3/healthtracker`, `dist/stage7-part2/healthtracker` и предыдущая `dist/healthtracker` сохранены и относятся к прежним версиям приложения.
-Команда сборки выше заменяет только каталог `stage7-black-hole-4`.
+Рабочие `dist/stage7-black-hole-4/healthtracker`, `dist/stage7-black-hole-3-gear/healthtracker`, `dist/stage7-black-hole-3-fullscreen/healthtracker`, `dist/stage7-black-hole-3-hours/healthtracker`, `dist/stage7-black-hole-3-compact/healthtracker`, `dist/stage7-black-hole-3-motion/healthtracker`, `dist/stage7-black-hole-3/healthtracker`, `dist/stage7-black-hole-2/healthtracker`, `dist/stage7-smooth/healthtracker`, `dist/stage7-chart-fix/healthtracker`, `dist/stage7-part3/healthtracker`, `dist/stage7-part2/healthtracker` и предыдущая `dist/healthtracker` сохранены и относятся к прежним версиям приложения.
+Команда сборки выше заменяет только каталог `stage7-black-hole-4-delete`.
 
 База: `$XDG_DATA_HOME/healthtracker/healthtracker.sqlite3` либо
 `~/.local/share/healthtracker/healthtracker.sqlite3`.
@@ -131,7 +131,7 @@ bwrap --unshare-net --dev-bind / / -- .venv/bin/python -m healthtracker --smoke-
 Для безопасной автоматической приёмки на временных искусственных данных:
 
 ```bash
-./dist/stage7-black-hole-4/healthtracker/healthtracker --check-bundle
+./dist/stage7-black-hole-4-delete/healthtracker/healthtracker --check-bundle
 ```
 
 Этот режим сам изолирует XDG-пути, проверяет семь форм, графики, аналитику,
@@ -157,3 +157,7 @@ bwrap --unshare-net --dev-bind / / -- .venv/bin/python -m healthtracker --smoke-
 - [Прогресс этапа 4](docs/stage4_report.md)
 
 Техническая приёмка порции 8 выполнена: 554 теста, нагрузочные базы до 1096 дней, Wayland 100/150/200%. Исправлена задержка дневника при чтении архива. Матрица, замеры и границы ручной проверки — [приёмка этапа 4](docs/stage4_acceptance.md). Работа остановлена для проверки пользователя; окончательная ручная пользовательская приёмка пока не заявлена. По следующему прямому указанию пользователя начат этап 5 — графики/аналитика; порции 1–3 завершены. Завершены части 1–3 порции 4: протокол, отрисовка и управление. Полный прогон: **915 passed, 7 warnings**; 49 новых сценариев управления. В Wayland при 150/200% — по **57 passed** для управления/графиков; 100% включён в полный набор. compileall/pip check и архитектурные проверки успешны. После части 3 работа остановлена; постоянные настройки и полноценная страница аналитики требуют отдельного задания. Подробности — docs/stage5_report.md. Этап 6 — резервирование и безопасные миграции — не начинался и не разрешён.
+
+Удаление: откройте сохранённую запись и нажмите «Удалить запись», затем подтвердите.
+В Дневнике это действие также доступно после выбора записи. Удаление окончательное.
+Подробнее: [отчёт](docs/record_deletion_report.md).
