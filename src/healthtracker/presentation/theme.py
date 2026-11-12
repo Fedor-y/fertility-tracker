@@ -12,6 +12,8 @@ QWidget { color: #e7e7e7; font-family: "Noto Sans", "Inter", sans-serif; font-si
     selection-background-color: #262626; selection-color: #ffffff; }
 QMainWindow, QDialog, QWidget#appBody { background: #030303; }
 QLabel { background: transparent; border: none; padding: 0; }
+QLabel[role="clockDate"] { color: #f2f2f2; font-size: 14px; font-weight: 600; }
+QLabel[role="clockTime"] { color: #f2f2f2; font-size: 18px; font-weight: 600; }
 QLabel[role="pageTitle"] { font-size: 21px; font-weight: 600; color: #f5f5f5; }
 QLabel[role="sectionTitle"] { font-size: 16px; font-weight: 600; color: #ebebeb; }
 QLabel[role="fieldTitle"] { font-weight: 600; color: #dedede; padding-top: 5px; }

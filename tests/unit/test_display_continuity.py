@@ -36,9 +36,10 @@ def test_display_keeps_null_long_gap_and_duplicate_boundaries():
 @pytest.mark.parametrize('compact',[True,False])
 def test_midnight_bridge_preserves_dst_fold_semantics(compact):
     zone=ZoneInfo('America/Havana')
-    start=datetime(2026,11,1,3,tzinfo=UTC)  # 31.10 23:00, затем два раза 01.11 00:00.
+    start=datetime(2025,11,2,3,tzinfo=UTC)  # 01.11 23:00, затем два раза 02.11 00:00.
     data=chart([sample(start,4),sample(start+timedelta(hours=1),7,2),sample(start+timedelta(hours=2),6,3)],
-               start=date(2026,10,31),days=3,zone=zone,compact=compact)
+               start=date(2025,11,1),days=3,zone=zone,compact=compact)
+    assert (start+timedelta(hours=2)).astimezone(zone).fold==1
     view=project_chart(data)['series'][0]
     assert view['segments']==([[0,1]] if compact else [[0,1,2]])
     assert view['points'][2]['value'][0]-view['points'][1]['value'][0]==(0 if compact else 3600)
